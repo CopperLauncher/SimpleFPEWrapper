@@ -168,12 +168,17 @@ SfpewEglContextAttributes sfpewClassifyEglContextAttributes(const EGLint* attrib
     if (!desktop_api || !parsed.valid || isForwardCompatible(parsed)) return result;
 
     if (!parsed.has_profile_mask) {
-        if (profileCapable(parsed)) {
-            result.request = SfpewEglContextRequest::CoreOnly;
-        } else {
-            result.request = SfpewEglContextRequest::Compatibility;
-            result.core_fallback = coreFallback(parsed);
-        }
+        // EGL_KHR_create_context semantics: omitting the profile mask is not
+        // a request for Core profile, even at version >= 3.2 — it means the
+        // caller has no preference. Many desktop-GL launchers (including
+        // this one) request a 3.2 floor purely for feature availability
+        // while still fully expecting compatibility/fixed-function behavior.
+        // Guessing CoreOnly here sends the context straight to BackendDirect
+        // with no probe and no SFPEW emulation, stranding calls like
+        // glMatrixMode with nothing to resolve them. Only an explicit
+        // CORE_PROFILE_BIT below should ever justify that route.
+        result.request = SfpewEglContextRequest::Compatibility;
+        result.core_fallback = coreFallback(parsed);
         return result;
     }
 
