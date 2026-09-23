@@ -188,7 +188,7 @@ SfpewEglContextAttributes sfpewClassifyEglContextAttributes(const EGLint* attrib
 
 bool sfpewCanCreateNativeCompatibilityContext(EGLDisplay dpy, EGLConfig config, const EGLint* attribs) {
     if (g_eglFuncs.eglBindAPI == nullptr || g_eglFuncs.eglCreateContext == nullptr ||
-        g_eglFuncs.eglDestroyContext == nullptr) {
+        g_eglFuncs.eglDestroyContext == nullptr || g_eglFuncs.eglGetProcAddress == nullptr) {
         return false;
     }
 
@@ -199,7 +199,19 @@ bool sfpewCanCreateNativeCompatibilityContext(EGLDisplay dpy, EGLConfig config, 
             if (g_eglFuncs.eglBindAPI(EGL_OPENGL_API) != EGL_TRUE) return;
             EGLContext context = g_eglFuncs.eglCreateContext(dpy, config, EGL_NO_CONTEXT, attribs);
             if (context == EGL_NO_CONTEXT) return;
-            supported = g_eglFuncs.eglDestroyContext(dpy, context) == EGL_TRUE;
+
+            // Context creation succeeding is not proof the backend can serve
+            // legacy fixed-function entry points: ANGLE-over-GLES backends
+            // will happily hand back a context that can never resolve them.
+            // Probe a representative fixed-function symbol before trusting it,
+            // otherwise BackendDirect dispatch strands calls like glMatrixMode
+            // with no wrapper fallback and no backend implementation.
+            const bool has_fixed_function =
+                g_eglFuncs.eglGetProcAddress("glMatrixMode") != nullptr;
+
+            supported = has_fixed_function &&
+                        g_eglFuncs.eglDestroyContext(dpy, context) == EGL_TRUE;
+            if (!has_fixed_function) g_eglFuncs.eglDestroyContext(dpy, context);
         });
         probe.join();
     } catch (...) {
